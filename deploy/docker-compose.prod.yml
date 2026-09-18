@@ -1,0 +1,70 @@
+# Runs on the Google Cloud VM, at /opt/enxoval/docker-compose.prod.yml.
+# Caddy terminates TLS and proxies to gunicorn; Postgres keeps its data in a volume.
+# The image tag comes from the deploy workflow via .env (IMAGE_TAG).
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      SITE_DOMAIN: ${SITE_DOMAIN:?set SITE_DOMAIN in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data # certificates live here; losing it means re-issuing
+      - caddy_config:/config
+    depends_on:
+      web:
+        condition: service_healthy
+
+  web:
+    image: ${IMAGE:?set IMAGE in .env}:${IMAGE_TAG:?set IMAGE_TAG in .env}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://enxoval:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/enxoval
+      DJANGO_DEBUG: "False"
+      # Caddy already sends http to https; a second redirect inside Django
+      # would loop, since it only ever sees the proxied http request.
+      DJANGO_SECURE_SSL_REDIRECT: "False"
+      # 127.0.0.1 is here for the healthcheck below, which reaches gunicorn
+      # directly; without it Django answers its own probe with 400 DisallowedHost
+      # and the container can never become healthy. Port 8000 is only `expose`d,
+      # so nothing outside the compose network can use it.
+      DJANGO_ALLOWED_HOSTS: ${SITE_DOMAIN},127.0.0.1
+      DJANGO_CSRF_TRUSTED_ORIGINS: https://${SITE_DOMAIN}
+    expose:
+      - "8000"
+    healthcheck:
+      # Hits the database, so a web process that is up but cannot reach
+      # Postgres never gets marked healthy and never gets traffic.
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=4).status == 200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 40s
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: enxoval
+      POSTGRES_USER: enxoval
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U enxoval -d enxoval"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

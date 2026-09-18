@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  pull_request:
+  # No `push` trigger on purpose. A push to main runs these same checks through
+  # Deploy, which calls this workflow; triggering on push as well would run CI
+  # twice for one commit and the two runs would fight over the concurrency
+  # group below, one cancelling the other and failing the deploy.
+  workflow_call:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Django
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Check for models changed without a migration
+        # Catches the commit that edits models.py and forgets makemigrations,
+        # which otherwise only fails on the VM, halfway through a deploy.
+        run: python backend/manage.py makemigrations --check --dry-run
+
+      - name: Tests
+        run: python backend/manage.py test registry --verbosity 2
+
+      - name: Production settings check
+        # The same checks Django runs with DEBUG off, so a deploy-only
+        # misconfiguration shows up here instead of in production.
+        env:
+          DJANGO_DEBUG: "False"
+          DJANGO_ALLOWED_HOSTS: example.com
+        run: |
+          DJANGO_SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(64))')" \
+            python backend/manage.py check --deploy --fail-level WARNING
+
+  frontend:
+    name: React
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+
+  image:
+    name: Docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build the image (no push)
+        # A pull request must not be able to break the image the deploy uses.
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
