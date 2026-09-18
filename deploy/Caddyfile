@@ -1,9 +1,26 @@
 # Caddy gets and renews the Let's Encrypt certificate on its own. The only
-# requirement is that SITE_DOMAIN's A record points at this VM and that
-# ports 80 and 443 are open — port 80 is how the certificate is validated.
+# requirements are that the names below resolve to this VM and that ports 80
+# and 443 are open — port 80 is how the certificate is validated.
+#
+# Cloudflare must stay in DNS-only mode (grey cloud) for this. Switch the record
+# to proxied (orange cloud) and two things break at once: the certificate
+# challenge goes through Cloudflare, and the client IP Caddy sees becomes
+# Cloudflare's, which lumps every visitor into one rate-limit bucket. Proxying
+# needs CF-Connecting-IP here and DJANGO_NUM_PROXIES=2 in .env.
+
+# www redirects to the bare domain, so there is one canonical address.
+www.{$SITE_DOMAIN} {
+	redir https://{$SITE_DOMAIN}{uri} permanent
+}
 
 {$SITE_DOMAIN} {
 	encode zstd gzip
+
+	# Drop whatever the client claims before proxying. reverse_proxy then writes
+	# X-Forwarded-For itself, from the address it is actually talking to, so the
+	# header reaching Django holds exactly one value that cannot be forged.
+	# The claim rate limit keys on it — see NUM_PROXIES in settings.py.
+	request_header -X-Forwarded-For
 
 	# No security headers set here on purpose. Django already sends them, HSTS
 	# included: it sees X-Forwarded-Proto from this proxy, so request.is_secure()

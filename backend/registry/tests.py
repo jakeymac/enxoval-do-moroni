@@ -334,6 +334,51 @@ class ReserveTests(APITestCase):
             self.assertEqual(self.client.post(url, body, format="json").status_code, 201)
         self.assertEqual(self.client.post(url, body, format="json").status_code, 429)
 
+    def test_a_forged_forwarded_for_header_buys_no_extra_reservations(self):
+        """Behind a proxy the rate limit has to key on the IP the proxy saw.
+
+        NUM_PROXIES makes DRF read X-Forwarded-For from the right, where the
+        closest proxy writes. Without it DRF keys on the whole header, and any
+        visitor can mint a fresh allowance by inventing a new left-hand value.
+        """
+        item = make_item(self.registry, name="Toalhas", quantity_needed=200)
+        url = self.url(item)
+        body = {"first_name": "Ana", "last_name": "Ribeiro", "email": "ana@example.com"}
+
+        # Rightmost address is what Caddy appends: the same visitor throughout.
+        for i in range(20):
+            response = self.client.post(
+                url, body, format="json", HTTP_X_FORWARDED_FOR=f"10.0.0.{i}, 203.0.113.9"
+            )
+            self.assertEqual(response.status_code, 201, f"request {i}")
+
+        blocked = self.client.post(
+            url, body, format="json", HTTP_X_FORWARDED_FOR="10.9.9.9, 203.0.113.9"
+        )
+        self.assertEqual(blocked.status_code, 429)
+
+    def test_a_different_visitor_still_gets_their_own_allowance(self):
+        """The fix must not lump every visitor behind the proxy into one bucket."""
+        item = make_item(self.registry, name="Toalhas", quantity_needed=200)
+        url = self.url(item)
+        body = {"first_name": "Ana", "last_name": "Ribeiro", "email": "ana@example.com"}
+
+        for _ in range(20):
+            self.client.post(url, body, format="json", HTTP_X_FORWARDED_FOR="203.0.113.9")
+        self.assertEqual(
+            self.client.post(
+                url, body, format="json", HTTP_X_FORWARDED_FOR="203.0.113.9"
+            ).status_code,
+            429,
+        )
+        # Someone else, arriving through the same proxy, is unaffected.
+        self.assertEqual(
+            self.client.post(
+                url, body, format="json", HTTP_X_FORWARDED_FOR="198.51.100.7"
+            ).status_code,
+            201,
+        )
+
 
 class NotificationTests(APITestCase):
     def setUp(self):

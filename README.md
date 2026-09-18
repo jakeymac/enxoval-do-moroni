@@ -125,8 +125,29 @@ builds it. `e2-micro` also works but leaves little headroom for Postgres.
 1. **Create the VM** with HTTP and HTTPS traffic allowed, and give it a **static external
    IP** (otherwise it changes on restart and breaks DNS).
 
-2. **Point your domain at it.** An `A` record for the hostname you want, to that static IP.
-   Certificates will not issue until this resolves.
+2. **Point `enxoval-do-moroni.com` at it.** The domain is on Cloudflare, so in the
+   Cloudflare dashboard → DNS:
+
+   | Type | Name | Content | Proxy status |
+   | --- | --- | --- | --- |
+   | `A` | `@` | the VM's static IP | **DNS only** (grey cloud) |
+   | `A` | `www` | the VM's static IP | **DNS only** (grey cloud) |
+
+   **The grey cloud matters.** With the orange cloud on, Cloudflare terminates TLS itself and
+   every visitor reaches Caddy from a Cloudflare address — which collapses the claim rate
+   limit into one shared bucket for the whole site. Switching it on later means setting
+   `DJANGO_NUM_PROXIES=2` and reading the client IP from `CF-Connecting-IP` in the Caddyfile.
+
+   Also set Cloudflare's SSL/TLS mode to **Full (strict)**. The default "Flexible" would talk
+   to the VM over plain http and loop against Django's https redirect.
+
+   Wait for it to resolve before going further — Caddy cannot get a certificate until it does:
+
+   ```bash
+   dig +short A enxoval-do-moroni.com     # should print the VM's IP, not a Cloudflare one
+   ```
+
+   `www` redirects to the bare domain, so there is one canonical address.
 
 3. **Bootstrap it** — installs Docker, creates `/opt/enxoval`, adds the nightly backup cron:
 
@@ -277,7 +298,10 @@ Django's own admin is at `/admin/` if you ever want to edit data directly.
 
 ## Notes on the design
 
-- Reservations are rate limited to 20/hour per IP.
+- Reservations are rate limited to 20/hour per IP. Two things make that number real: the
+  count lives in a shared database cache, so gunicorn's workers do not each keep their own,
+  and `NUM_PROXIES` pins which `X-Forwarded-For` entry identifies the visitor, so a forged
+  header cannot buy a fresh allowance. Both are covered by tests.
 - Name, surname and a valid e-mail are required by the server, not just the form.
 - The public API never exposes who reserved what — visitors only see counts.
 - Reserving locks the item row, so two people clicking at the same moment can't over-reserve.

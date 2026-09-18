@@ -104,6 +104,18 @@ STORAGES = {
     "staticfiles": {"BACKEND": "whitenoise.storage.CompressedStaticFilesStorage"},
 }
 
+# The claim rate limit counts through the cache, so the cache has to be shared.
+# gunicorn runs several workers, and the default in-memory cache gives each one
+# its own counter — which quietly multiplies the limit by the worker count and
+# resets it on every deploy. The database is already here and the traffic is a
+# handful of writes an hour, so it is the shared store, no extra service needed.
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.db.DatabaseCache",
+        "LOCATION": "django_cache",
+    }
+}
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 REST_FRAMEWORK = {
@@ -113,6 +125,15 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
     "DEFAULT_THROTTLE_CLASSES": ["rest_framework.throttling.ScopedRateThrottle"],
     "DEFAULT_THROTTLE_RATES": {"claim": "20/hour"},
+    # How many proxies sit in front of this app. It matters: left unset, DRF
+    # keys the rate limit on the whole X-Forwarded-For string, so a visitor can
+    # send a made-up X-Forwarded-For and get a fresh 20 reservations on every
+    # request. Set, DRF reads the Nth value from the right — the one the closest
+    # proxy added, which a client cannot forge.
+    #   1  Caddy only (the VM setup, Cloudflare in DNS-only mode)
+    #   2  Caddy behind a proxy such as Cloudflare's orange cloud
+    #   0  no proxy at all; trust REMOTE_ADDR
+    "NUM_PROXIES": int(os.environ.get("DJANGO_NUM_PROXIES", "1")),
 }
 
 from datetime import timedelta  # noqa: E402
