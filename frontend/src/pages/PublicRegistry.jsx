@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 
 import { api } from '../api.js'
+import PublicHeader from '../components/PublicHeader.jsx'
 
 const STORAGE_KEY = 'enxoval.visitante'
 const BLANK = { first_name: '', last_name: '', email: '' }
@@ -86,78 +87,100 @@ export default function PublicRegistry() {
 
   if (notFound) {
     return (
-      <main className="page">
-        <h1>Esta página não está disponível</h1>
-        <p className="muted">
-          O enxoval pode ter saído do ar. Fale com quem enviou o link para você.
-        </p>
-      </main>
+      <>
+        <PublicHeader />
+        <main className="page">
+          <h1>Esta página não está disponível</h1>
+          <p className="muted">
+            O enxoval pode ter saído do ar. Fale com quem enviou o link para você.
+          </p>
+        </main>
+      </>
     )
   }
 
-  if (!registry) return <main className="page muted">Carregando…</main>
+  if (!registry) {
+    return (
+      <>
+        <PublicHeader />
+        <main className="page muted">Carregando…</main>
+      </>
+    )
+  }
 
   const available = registry.items.filter((i) => !i.is_fully_claimed)
   const taken = registry.items.filter((i) => i.is_fully_claimed)
   const ready = missingFields(visitor).length === 0
 
   return (
-    <main className="page">
-      <h1>{registry.title}</h1>
-      {registry.intro && (
-        <p className="muted" style={{ fontSize: '1.05rem' }}>
-          {registry.intro}
-        </p>
-      )}
+    <>
+      <PublicHeader />
+      <main className="page">
+        <h1>{registry.title}</h1>
+        {registry.intro && (
+          <p className="muted" style={{ fontSize: '1.05rem' }}>
+            {registry.intro}
+          </p>
+        )}
 
-      {thanks && (
-        <div className="alert alert--ok" style={{ margin: '16px 0' }}>
-          <strong>Obrigado!</strong> {thanks}
-        </div>
-      )}
-
-      <VisitorFields
-        innerRef={identityRef}
-        visitor={visitor}
-        flagged={flagged}
-        ready={ready}
-        onChange={field}
-      />
-
-      {error && (
-        <div className="alert alert--error" style={{ marginBottom: 16 }}>
-          {error}
-        </div>
-      )}
-
-      {available.length === 0 && (
-        <div className="card card--flat muted">
-          Todos os itens já foram escolhidos. Obrigado a todo mundo que ajudou!
-        </div>
-      )}
-
-      <div className="item-grid">
-        {available.map((item) => (
-          <ItemCard
-            key={item.id}
-            item={item}
-            busy={claimingId === item.id}
-            onClaim={(quantity) => claim(item, quantity)}
-          />
-        ))}
-      </div>
-
-      {taken.length > 0 && (
-        <>
-          <h2 style={{ marginTop: 32 }}>Já escolhidos</h2>
-          <div className="item-grid">
-            {taken.map((item) => (
-              <ItemCard key={item.id} item={item} />
-            ))}
+        {thanks && (
+          <div className="alert alert--ok" style={{ margin: '16px 0' }}>
+            <strong>Obrigado!</strong> {thanks}
           </div>
-        </>
-      )}
-    </main>
+        )}
+
+        <VisitorFields
+          innerRef={identityRef}
+          visitor={visitor}
+          flagged={flagged}
+          ready={ready}
+          onChange={field}
+        />
+
+        {error && (
+          <div className="alert alert--error" style={{ marginBottom: 16 }}>
+            {error}
+          </div>
+        )}
+
+        {/* Lista vazia e lista toda reservada são coisas diferentes: dizer
+            "já foi tudo escolhido" num enxoval recém-criado afasta quem veio
+            ajudar logo no começo, que é justamente quando mais precisa. */}
+        {registry.items.length === 0 ? (
+          <div className="card card--flat muted">
+            A lista ainda está sendo montada. Volte em breve!
+          </div>
+        ) : (
+          available.length === 0 && (
+            <div className="card card--flat muted">
+              Todos os itens já foram escolhidos. Obrigado a todo mundo que ajudou!
+            </div>
+          )
+        )}
+
+        <div className="item-grid">
+          {available.map((item) => (
+            <ItemCard
+              key={item.id}
+              item={item}
+              busy={claimingId === item.id}
+              onClaim={(quantity) => claim(item, quantity)}
+            />
+          ))}
+        </div>
+
+        {taken.length > 0 && (
+          <>
+            <h2 style={{ marginTop: 32 }}>Já escolhidos</h2>
+            <div className="item-grid">
+              {taken.map((item) => (
+                <ItemCard key={item.id} item={item} />
+              ))}
+            </div>
+          </>
+        )}
+      </main>
+    </>
   )
 }
 
