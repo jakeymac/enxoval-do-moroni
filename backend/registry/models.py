@@ -43,18 +43,26 @@ class Registry(models.Model):
 
     @classmethod
     def load(cls, owner=None):
-        """The one enxoval. Created on first use so a fresh account is never empty.
+        """The enxoval. There is one, and every account manages that same one.
 
-        Without an owner this is the public lookup, and it is deliberately pinned
-        to the first enxoval ever created: if a second account exists, taking the
-        real one off the air must take the page down, not quietly promote someone
-        else's list to the site root.
+        Keyed on nothing but "the first row": an earlier version looked it up per
+        owner and created a fresh enxoval for any account that did not have one,
+        so a second account silently got a second, invisible list — items added
+        there never appeared on the public page. One household, one enxoval; who
+        happens to be signed in does not change which list they are editing.
+
+        `owner` is only the fallback for a brand new install with no rows yet.
+        Passing it also means "this is the owner side", which skips the
+        is_published check so the panel still works while the page is offline.
         """
-        if owner is not None:
-            registry = cls.objects.filter(owner=owner).order_by("pk").first()
-            return registry or cls.objects.create(owner=owner, title="Nosso Enxoval")
         registry = cls.objects.order_by("pk").first()
-        return registry if registry and registry.is_published else None
+        if registry is None:
+            if owner is None:
+                return None
+            return cls.objects.create(owner=owner, title="Nosso Enxoval")
+        if owner is None and not registry.is_published:
+            return None
+        return registry
 
 
 class Item(models.Model):

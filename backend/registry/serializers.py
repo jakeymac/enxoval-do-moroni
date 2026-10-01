@@ -135,8 +135,12 @@ class ItemSerializer(serializers.ModelSerializer):
         ]
 
     def validate_registry(self, registry):
-        if registry.owner_id != self.context["request"].user.id:
-            raise serializers.ValidationError("Este enxoval não é seu.")
+        # There is one enxoval; an item can only belong to it. Checking against
+        # the owner instead would wrongly reject a second account editing the
+        # same list, and wrongly accept an item aimed at a stray second row.
+        the_one = Registry.load(owner=self.context["request"].user)
+        if the_one is None or registry.pk != the_one.pk:
+            raise serializers.ValidationError("Este não é o enxoval do site.")
         return registry
 
 

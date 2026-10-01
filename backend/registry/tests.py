@@ -85,9 +85,25 @@ class SingleRegistryTests(TestCase):
         first.save()
         self.assertIsNone(Registry.load())
 
-    def test_each_account_keeps_its_own(self):
+    def test_every_account_gets_the_same_one(self):
+        """One household, one enxoval. A second account must not mint a second.
+
+        It used to: load() looked the enxoval up by owner and created a fresh
+        one for any account without it, so items added from a second sign-in
+        landed on an invisible list and never reached the public page.
+        """
         a, b = make_owner("a", "a@example.com"), make_owner("b", "b@example.com")
-        self.assertNotEqual(Registry.load(owner=a).pk, Registry.load(owner=b).pk)
+        self.assertEqual(Registry.load(owner=a).pk, Registry.load(owner=b).pk)
+        self.assertEqual(Registry.objects.count(), 1)
+
+    def test_an_item_added_by_a_second_account_shows_on_the_public_page(self):
+        """The regression that sent twelve real items to a list nobody could see."""
+        first = make_owner("first", "first@example.com")
+        Registry.load(owner=first)
+        second = make_owner("second", "second@example.com")
+        make_item(Registry.load(owner=second), name="Gravatas")
+        public = Registry.load()
+        self.assertEqual([i.name for i in public.items.all()], ["Gravatas"])
 
 
 class HealthCheckTests(TestCase):
@@ -485,16 +501,35 @@ class OwnerApiTests(APITestCase):
         self.assertEqual(data["title"], self.registry.title)
         self.assertEqual(data["pending_claims"], 1)
 
-    def test_a_brand_new_account_gets_one_created_rather_than_a_404(self):
+    def test_a_brand_new_account_opens_the_existing_enxoval(self):
+        """A new sign-in joins the one enxoval; it does not start another."""
+        before = Registry.objects.count()
         fresh = make_owner("fresh", "fresh@example.com")
         self.sign_in(fresh)
         response = self.client.get(REGISTRY)
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(Registry.objects.filter(owner=fresh).count(), 1)
+        self.assertEqual(response.data["id"], self.registry.id)
+        self.assertEqual(Registry.objects.count(), before)
 
-    def test_each_account_sees_only_its_own_enxoval(self):
+    def test_the_very_first_account_does_get_one_created(self):
+        """On an empty install there is nothing to join, so one is made."""
+        Registry.objects.all().delete()
+        self.sign_in(make_owner("solo", "solo@example.com"))
+        self.assertEqual(self.client.get(REGISTRY).status_code, 200)
+        self.assertEqual(Registry.objects.count(), 1)
+
+    def test_a_second_account_edits_the_same_enxoval(self):
+        """Shared on purpose: a spouse signing in manages the same list."""
         self.sign_in(self.stranger)
-        self.assertEqual(self.client.get(REGISTRY).data["id"], self.stranger_registry.id)
+        self.assertEqual(self.client.get(REGISTRY).data["id"], self.registry.id)
+
+    def test_a_second_account_can_add_items_to_it(self):
+        self.sign_in(self.stranger)
+        response = self.client.post(
+            "/api/items/", {"registry": self.registry.id, "name": "Gravatas"}, format="json"
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertIn("Gravatas", [i.name for i in self.registry.items.all()])
 
     def test_pending_count_ignores_claims_already_dealt_with(self):
         Claim.objects.filter(pk=self.claim.pk).update(status=Claim.Status.FULFILLED)
@@ -525,7 +560,9 @@ class OwnerApiTests(APITestCase):
 
     # --- items ------------------------------------------------------------
 
-    def test_the_item_list_never_leaks_across_accounts(self):
+    def test_items_on_a_stray_registry_row_are_not_listed(self):
+        """Nothing should create a second row now, but if one exists (via the
+        Django admin, say) the API must not surface it as part of the enxoval."""
         self.sign_in()
         ids = [i["id"] for i in self.client.get("/api/items/").data]
         self.assertEqual(ids, [self.item.id])
@@ -547,7 +584,7 @@ class OwnerApiTests(APITestCase):
         self.assertEqual(response.status_code, 201)
         self.assertEqual(self.registry.items.count(), 2)
 
-    def test_you_cannot_add_an_item_to_another_accounts_enxoval(self):
+    def test_an_item_cannot_be_aimed_at_a_stray_registry_row(self):
         self.sign_in()
         response = self.client.post(
             "/api/items/", {"registry": self.stranger_registry.id, "name": "Nada"}, format="json"
@@ -555,7 +592,7 @@ class OwnerApiTests(APITestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(self.stranger_registry.items.count(), 1)
 
-    def test_you_cannot_move_your_item_onto_another_accounts_enxoval(self):
+    def test_an_item_cannot_be_moved_onto_a_stray_row(self):
         self.sign_in()
         response = self.client.patch(
             f"/api/items/{self.item.id}/", {"registry": self.stranger_registry.id}, format="json"
@@ -564,7 +601,7 @@ class OwnerApiTests(APITestCase):
         self.item.refresh_from_db()
         self.assertEqual(self.item.registry, self.registry)
 
-    def test_another_accounts_item_cannot_be_edited_or_deleted(self):
+    def test_an_item_on_a_stray_row_cannot_be_edited_or_deleted(self):
         self.sign_in()
         path = f"/api/items/{self.stranger_item.id}/"
         self.assertEqual(self.client.patch(path, {"name": "Meu"}, format="json").status_code, 404)
@@ -589,7 +626,7 @@ class OwnerApiTests(APITestCase):
         self.assertEqual(row["email"], "ana@example.com")
         self.assertEqual(row["item_name"], "Jogo de panelas")
 
-    def test_the_reservation_list_never_leaks_across_accounts(self):
+    def test_reservations_on_a_stray_row_are_not_listed(self):
         self.sign_in()
         names = [c["name"] for c in self.client.get("/api/claims/").data]
         self.assertEqual(names, ["Ana Ribeiro"])
@@ -642,7 +679,7 @@ class OwnerApiTests(APITestCase):
         )
         self.assertEqual(response.status_code, 405)
 
-    def test_another_accounts_reservation_is_untouchable(self):
+    def test_a_reservation_on_a_stray_row_is_untouchable(self):
         self.sign_in()
         path = f"/api/claims/{self.stranger_claim.id}/"
         self.assertEqual(

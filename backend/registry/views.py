@@ -124,10 +124,15 @@ class RegistryView(RetrieveUpdateAPIView):
 
 
 class ItemViewSet(viewsets.ModelViewSet):
+    """Itens do enxoval. Scoped to the one enxoval, not to who is signed in:
+    every account manages the same list, so filtering by owner would hide the
+    items from anyone but whoever happened to create them."""
+
     serializer_class = ItemSerializer
 
     def get_queryset(self):
-        return Item.objects.filter(registry__owner=self.request.user).prefetch_related("claims")
+        registry = Registry.load(owner=self.request.user)
+        return Item.objects.filter(registry=registry).prefetch_related("claims")
 
 
 class ClaimViewSet(viewsets.ModelViewSet):
@@ -137,7 +142,8 @@ class ClaimViewSet(viewsets.ModelViewSet):
     http_method_names = ["get", "patch", "delete", "head", "options"]
 
     def get_queryset(self):
-        return Claim.objects.filter(item__registry__owner=self.request.user).select_related("item")
+        registry = Registry.load(owner=self.request.user)
+        return Claim.objects.filter(item__registry=registry).select_related("item")
 
     @action(detail=False, methods=["get"])
     def pending(self, request):
