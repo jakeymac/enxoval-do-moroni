@@ -243,7 +243,7 @@ function VisitorFields({ innerRef, visitor, flagged, ready, onChange }) {
           id="message"
           value={visitor.message}
           onChange={(e) => onChange('message', e.target.value)}
-          placeholder="Uma mensagem para quem vai receber — ex.: “Com carinho, tia Maria”."
+          placeholder="Uma mensagem para o Elder Sargaço"
         />
         <p className="faint" style={{ margin: '4px 0 0' }}>
           Vai junto com cada item que você escolher.
