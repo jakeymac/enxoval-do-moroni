@@ -424,8 +424,20 @@ class NotificationTests(APITestCase):
     def test_the_email_is_in_portuguese_and_carries_everything_needed_to_reply(self):
         self.reserve()
         body = mail.outbox[0].body
-        for expected in ("Ana Ribeiro", "ana@example.com", "Feliz em ajudar", "Entre em contato"):
+        for expected in ("Ana Ribeiro", "ana@example.com", "Feliz em ajudar", "Responda a este e-mail"):
             self.assertIn(expected, body)
+
+    def test_replying_to_the_notice_reaches_the_giver(self):
+        """Hitting Reply must go to the person buying, not back to the site.
+
+        The notice is sent from the site's own mailbox, so without reply_to the
+        obvious action — Reply — would quietly go nowhere useful.
+        """
+        self.reserve()
+        sent = mail.outbox[0]
+        self.assertEqual(sent.reply_to, ["ana@example.com"])
+        self.assertNotIn("ana@example.com", sent.from_email)
+        self.assertIn("Responda a este e-mail", sent.body)
 
     def test_notify_email_overrides_the_account_address(self):
         self.registry.notify_email = "esposa@example.com"
@@ -442,7 +454,7 @@ class NotificationTests(APITestCase):
         self.assertEqual(Claim.objects.count(), 1)
 
     def test_an_smtp_outage_never_loses_the_reservation(self):
-        with patch("registry.views.send_mail", side_effect=OSError("SMTP fora do ar")):
+        with patch("registry.views.EmailMessage", side_effect=OSError("SMTP fora do ar")):
             with self.assertLogs("registry.views", level="ERROR"):
                 response = self.reserve()
         self.assertEqual(response.status_code, 201)

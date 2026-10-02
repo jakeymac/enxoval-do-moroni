@@ -1,6 +1,6 @@
 import logging
 
-from django.core.mail import send_mail
+from django.core.mail import EmailMessage
 from django.db import connections, transaction
 from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404
@@ -55,16 +55,21 @@ def notify_owner(claim):
         f"Item:      {claim.item.name} (qtd {claim.quantity})\n"
         f"E-mail:    {claim.email}\n"
         f"Recado:    {claim.message or '(nenhum)'}\n\n"
-        "Entre em contato para combinar os detalhes."
+        "Responda a este e-mail para falar direto com "
+        f"{claim.first_name} e combinar os detalhes."
     )
     try:
-        send_mail(
+        # EmailMessage rather than send_mail, for reply_to: the message is sent
+        # from the site's own mailbox, so a plain Reply would go back to the
+        # site instead of to the person offering to buy the item. Pointing
+        # reply_to at the giver makes the obvious action the right one.
+        EmailMessage(
             subject=f"{claim.name} vai comprar: {claim.item.name}",
-            message=body,
+            body=body,
             from_email=None,
-            recipient_list=[to],
-            fail_silently=False,
-        )
+            to=[to],
+            reply_to=[claim.email],
+        ).send(fail_silently=False)
     except Exception:
         # Uma falha de e-mail nunca pode perder a reserva; ela fica salva e visível no painel.
         logger.exception("Falha ao enviar o aviso da reserva %s", claim.pk)
