@@ -104,6 +104,33 @@ STORAGES = {
     "staticfiles": {"BACKEND": "whitenoise.storage.CompressedStaticFilesStorage"},
 }
 
+# Without this, nothing in the project configures logging: the app's own
+# loggers have no handlers, so a swallowed exception reaches stderr only via
+# Python's bare last-resort handler, with no timestamp and no logger name.
+# A mail failure is caught on purpose so it cannot lose a reservation, which
+# makes the log the only trace it ever happened — it has to be readable.
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "standard": {
+            "format": "{asctime} {levelname} {name}: {message}",
+            "style": "{",
+        }
+    },
+    "handlers": {
+        # Containers log to stdout; `docker compose logs web` is where this lands.
+        "console": {"class": "logging.StreamHandler", "formatter": "standard"},
+    },
+    "root": {"handlers": ["console"], "level": "INFO"},
+    "loggers": {
+        "django": {"handlers": ["console"], "level": "INFO", "propagate": False},
+        # Noisy and low value: one line per request, already in the Caddy log.
+        "django.server": {"handlers": ["console"], "level": "WARNING", "propagate": False},
+        "registry": {"handlers": ["console"], "level": "INFO", "propagate": False},
+    },
+}
+
 # The claim rate limit counts through the cache, so the cache has to be shared.
 # gunicorn runs several workers, and the default in-memory cache gives each one
 # its own counter — which quietly multiplies the limit by the worker count and
