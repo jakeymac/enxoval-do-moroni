@@ -4,7 +4,7 @@ import { api } from '../api.js'
 import PublicHeader from '../components/PublicHeader.jsx'
 
 const STORAGE_KEY = 'enxoval.visitante'
-const BLANK = { first_name: '', last_name: '', email: '' }
+const BLANK = { first_name: '', last_name: '', email: '', message: '' }
 
 /** Quem já preencheu os dados não precisa digitar de novo a cada item. */
 function loadVisitor() {
@@ -73,6 +73,7 @@ export default function PublicRegistry() {
         first_name: visitor.first_name.trim(),
         last_name: visitor.last_name.trim(),
         email: visitor.email.trim(),
+        message: visitor.message.trim(),
         quantity,
       })
       setThanks(result.contact_note || 'Entraremos em contato em breve.')
@@ -234,6 +235,19 @@ function VisitorFields({ innerRef, visitor, flagged, ready, onChange }) {
             autoComplete="email"
           />
         </div>
+      </div>
+
+      <div>
+        <label htmlFor="message">Recado (opcional)</label>
+        <textarea
+          id="message"
+          value={visitor.message}
+          onChange={(e) => onChange('message', e.target.value)}
+          placeholder="Uma mensagem para quem vai receber — ex.: “Com carinho, tia Maria”."
+        />
+        <p className="faint" style={{ margin: '4px 0 0' }}>
+          Vai junto com cada item que você escolher.
+        </p>
       </div>
 
       {flagged.length > 0 ? (
